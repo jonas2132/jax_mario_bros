@@ -5,12 +5,13 @@ import jax.numpy as jnp
 from jax import jit
 
 # --- Konstanten ---
-WIDTH, HEIGHT = 640, 480
+RENDER_SCALE = 3
+WIDTH, HEIGHT = 160, 210
 GRAVITY = 0.5
 JUMP_VELOCITY = -10.0
 MOVE_SPEED = 3.0
 PLAYER_SIZE = (30, 30)
-PLATFORM_RECT = (0, 400, 640, 20)  # x, y, w, h
+PLATFORM_RECT = (0, 500, WIDTH * RENDER_SCALE, 20)  # x, y, w, h
 
 # --- GameState mit chex ---
 @chex.dataclass
@@ -75,7 +76,7 @@ def step(state: GameState, action: jnp.ndarray) -> GameState:
 # --- Hauptprogramm ---
 def main():
     pygame.init()
-    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    screen = pygame.display.set_mode((WIDTH*RENDER_SCALE, HEIGHT * RENDER_SCALE))
     pygame.display.set_caption("JAX_MarioBros")
     clock = pygame.time.Clock()
 
