@@ -10,7 +10,7 @@
 | 27          | `jumping_state`        | jump state                      | 0 - 150       |                                    |
 | 42, 44      | `player_y`, `player_x` | Player position                 | –             | Updated constantly                |
 | 101–108     | `bonus_coin_flags`     | Coin active (1) or not (0)      | 0/1           |                          |
-| 107–110     | `pest_states`          | State/animation values          | –             | Determines enemy type and frame   |
+| 107–110     | `pest_states`          | State/animation values         | –             | Determines enemy type and frame   |
 | 111         | `bonus_block_flag`     | Shows if bonus block is active  | 0/1           | –                                 |
 | 115         | `fireball_x`           | Fireball X coordinate           | Range of width| present `117` for full position |
 | 117         | `fireball_lane`        | Fireball Y layer (0–3)          | –             | Multiplied by 40 then offset      |
