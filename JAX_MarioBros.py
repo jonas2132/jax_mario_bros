@@ -223,8 +223,9 @@ def main():
             jumpL = False
             jumpR = False
             
-        pressed_right = keys[pygame.K_RIGHT] and not keys[pygame.K_LEFT]
-        pressed_left = keys[pygame.K_LEFT] and not keys[pygame.K_RIGHT]
+        if not jumpL and not jumpR:
+            pressed_right = keys[pygame.K_RIGHT] and not keys[pygame.K_LEFT]
+            pressed_left = keys[pygame.K_LEFT] and not keys[pygame.K_RIGHT]
         
         if keys[pygame.K_SPACE]:
             jump = 1
