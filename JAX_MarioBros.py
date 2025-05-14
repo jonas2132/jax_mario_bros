@@ -17,8 +17,9 @@ ASCEND_VY     = -2.0         # ↑ 2 px / frame
 DESCEND_VY    =  2.0         # ↓ 2 px / frame
 ASCEND_FRAMES = 21         # 42 px tall jump (21 × 2)
 
-# --- Spieler-Größe ---
+# --- Spieler-und-Enemy-Größe ---
 PLAYER_SIZE = (9, 21)  # w, h
+ENEMY_SIZE = (8, 8)  # w, h
 
 PLATFORMS = jnp.array([
     [0, 168, 160, 24],   # Boden
@@ -43,16 +44,23 @@ class GameState:
     on_ground: bool
     jump_phase: jnp.int32
     ascend_frames: jnp.int32
+    enemy_pos: jnp.ndarray  # shape (N, 2)
+    enemy_vel: jnp.ndarray  # shape (N, 2)
 
 # --- Initialzustand ---
 def init_state():
+    enemy_pos = jnp.array([[50.0, 160.0], [120.0, 160.0]])
+    enemy_vel = jnp.array([[0.5, 0.0], [-0.5, 0.0]])
     # Startposition über zentraler Ebene
     return GameState(
         pos=jnp.array([37.0, 74.0]),   # 37,74 passt zur mittleren Plattform
         vel=jnp.array([0.0, 0.0]),
         on_ground=False,
         jump_phase=jnp.int32(0),
-        ascend_frames=jnp.int32(0)
+        ascend_frames=jnp.int32(0),
+        enemy_pos=enemy_pos,
+        enemy_vel=enemy_vel
+
     )
 
 # --- AABB-Kollision: Boden (landed) und Decke (bumped) ---
@@ -96,7 +104,15 @@ def check_collision(pos: jnp.ndarray, vel: jnp.ndarray, platforms: jnp.ndarray, 
 
     return jnp.any(landed), jnp.any(bumped | pow_bumped), new_y_land, jnp.maximum(new_y_bump, pow_y_new), pow_bumped
 
+def check_enemy_collision(player_pos, enemy_pos):
+    px, py = player_pos
+    pw, ph = PLAYER_SIZE
+    ex, ey = enemy_pos[:, 0], enemy_pos[:, 1]
+    ew, eh = ENEMY_SIZE
 
+    overlap_x = (px < ex + ew) & (px + pw > ex)
+    overlap_y = (py < ey + eh) & (py + ph > ey)
+    return jnp.any(overlap_x & overlap_y)
 
 
 # --- JIT-kompilierte Schritt-Funktion ---
@@ -218,6 +234,14 @@ def main():
             draw_rect((228, 111, 111), plat.tolist())
         # POW block
         draw_rect((201, 164, 74), POW_BLOCK[0].tolist())
+
+        for ep in state.enemy_pos:
+            draw_rect((255, 0, 0), (*ep.tolist(), *ENEMY_SIZE))
+
+        # Collision check for enemies (basic death)
+        if check_enemy_collision(state.pos, state.enemy_pos):
+            print("Hit by enemy! Respawning...")
+            state = init_state()
 
         pygame.display.flip()
         clock.tick(30)
