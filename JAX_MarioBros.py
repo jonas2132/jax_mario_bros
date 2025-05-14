@@ -19,6 +19,7 @@ ASCEND_FRAMES = 21         # 42 px tall jump (21 × 2)
 
 # --- Spieler-und-Enemy-Größe ---
 PLAYER_SIZE = (9, 21)  # w, h
+PLAYER_COLOR = (181, 83, 40)
 ENEMY_SIZE = (8, 8)  # w, h
 
 PLATFORMS = jnp.array([
@@ -42,8 +43,8 @@ class GameState:
     pos: jnp.ndarray     # [x, y]
     vel: jnp.ndarray     # [vx, vy]
     on_ground: bool
-    jump_phase: jnp.int32
-    ascend_frames: jnp.int32
+    jump_phase: int
+    ascend_frames: int
     enemy_pos: jnp.ndarray  # shape (N, 2)
     enemy_vel: jnp.ndarray  # shape (N, 2)
 
@@ -118,9 +119,8 @@ def check_enemy_collision(player_pos, enemy_pos):
 # --- JIT-kompilierte Schritt-Funktion ---
 @jit
 def step(state: GameState, action: jnp.ndarray) -> GameState:
-    move, jump_btn = action          # move ∈ {-1,0,1}, jump_btn ∈ {0,1}
+    move, jump_btn = action[0], action[1].astype(jnp.int32)
     vx = MOVE_SPEED * move
-
     # -------- phase / frame bookkeeping --------------------------
     start_jump = (jump_btn == 1) & state.on_ground & (state.jump_phase == 0)
 
@@ -168,7 +168,9 @@ def step(state: GameState, action: jnp.ndarray) -> GameState:
         vel=jnp.array([vx, vy_final]),
         on_ground=landed,
         jump_phase=jump_phase.astype(jnp.int32),
-        ascend_frames=asc_left.astype(jnp.int32)
+        ascend_frames=asc_left.astype(jnp.int32),
+        enemy_pos=state.enemy_pos,
+        enemy_vel=state.enemy_vel
     )
 
 # -------------------- MAIN ----------------------------------------
@@ -188,7 +190,15 @@ def main():
     pat_len        = len(movement_pattern)
     idx_right      = 0      # current index if RIGHT is held
     idx_left       = 0      # current index if LEFT is held
-    # --------------------------------------------------------------
+    jump = 0
+    jumpL = False
+    jumpR = False
+    # --- New Variables for stop frames -------------------------
+    last_dir = 0
+    brake_frames_left = 0
+    BRAKE_DURATION = 10           # in Frames
+    BRAKE_TOTAL_DISTANCE = 7.0    # in Pixels
+    brake_speed = BRAKE_TOTAL_DISTANCE / BRAKE_DURATION  # ≈ 0.7 px/frame
 
     def draw_rect(color, rect):
         r = pygame.Rect(rect)
@@ -203,32 +213,71 @@ def main():
                 running = False
 
         keys = pygame.key.get_pressed()
-        move, jump = 0, 0
+        
+        if keys[pygame.K_ESCAPE]:     # stops game when Escape is pressed
+            running = False
 
-        if keys[pygame.K_RIGHT] and not keys[pygame.K_LEFT]:
-            # apply pattern in +x direction
-            move = movement_pattern[idx_right]
-            idx_right = (idx_right + 1) % pat_len
-            idx_left  = 0                # reset the other direction
-        elif keys[pygame.K_LEFT] and not keys[pygame.K_RIGHT]:
-            # apply pattern in -x direction
-            move = -movement_pattern[idx_left]
-            idx_left  = (idx_left + 1) % pat_len
-            idx_right = 0
-        else:
-            # nothing pressed – stand still & reset both indices
-            move = 0
-            idx_left = idx_right = 0
-
+        if state.on_ground:
+            move = 0.0
+            jump = 0
+            jumpL = False
+            jumpR = False
+            
+        pressed_right = keys[pygame.K_RIGHT] and not keys[pygame.K_LEFT]
+        pressed_left = keys[pygame.K_LEFT] and not keys[pygame.K_RIGHT]
+        
         if keys[pygame.K_SPACE]:
             jump = 1
+                    
+        if jump == 0:
+            if pressed_right:
+                move = movement_pattern[idx_right]
+                idx_right = (idx_right + 1) % pat_len
+                idx_left = 0
+                last_dir = 1
+                brake_frames_left = 0
+            elif pressed_left:
+                move = -movement_pattern[idx_left]
+                idx_left = (idx_left + 1) % pat_len
+                idx_right = 0
+                last_dir = -1
+                brake_frames_left = 0
+            else:
+                if last_dir != 0 and brake_frames_left == 0 and state.on_ground:
+                    brake_frames_left = BRAKE_DURATION
+
+                if brake_frames_left > 0:
+                    move = last_dir * brake_speed
+                    brake_frames_left -= 1
+                    if brake_frames_left == 0:
+                        last_dir = 0
+                else:
+                    move = 0.0
+        elif jump == 1:
+            if pressed_right or jumpR:
+                move = movement_pattern[idx_right]
+                idx_right = (idx_right + 1) % pat_len
+                idx_left = 0
+                jumpR = True
+            elif pressed_left or jumpL:
+                move = -movement_pattern[idx_left]
+                idx_left = (idx_left + 1) % pat_len
+                idx_right = 0
+                jumpL = True
+            brake_frames_left = 0
+            last_dir = 0
+
 
         # ----------------- UPDATE & RENDER ------------------------
-        state = step(state, jnp.array([move, jump], dtype=jnp.int32))
+        state = step(state, jnp.array([move, jump], dtype=jnp.float32))
+
 
         screen.fill((0, 0, 0))
         # player
-        draw_rect((181, 83, 40), (*state.pos.tolist(), *PLAYER_SIZE))
+        if brake_frames_left > 0:
+            draw_rect((255,0,0), (*state.pos.tolist(), *PLAYER_SIZE))
+        else:
+            draw_rect(PLAYER_COLOR, (*state.pos.tolist(), *PLAYER_SIZE))
         # platforms
         for plat in PLATFORMS:
             draw_rect((228, 111, 111), plat.tolist())
