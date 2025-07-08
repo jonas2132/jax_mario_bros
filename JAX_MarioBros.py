@@ -22,6 +22,18 @@ PLAYER_SIZE = (9, 21)  # w, h
 PLAYER_COLOR = (181, 83, 40)
 ENEMY_SIZE = (8, 8)  # w, h
 
+# --- Coin parameters ---
+COIN_SIZE = 6
+COIN_COLOR = (255, 215, 0)  # Gold
+COIN_SCORE = 800
+COIN_STAGE_DURATION = 15 * 30  # 15 seconds at 30 FPS
+COIN_POSITIONS = jnp.array([
+    [35.0, 55.0], [120.0, 55.0],   # Top platforms
+    [60.0, 93.0], [100.0, 93.0],   # Middle platform
+    [20.0, 133.0], [140.0, 133.0], # Bottom platforms
+    [80.0, 55.0]                    # Center top
+])
+
 PLATFORMS = jnp.array([
     [0, 168, 160, 24],   # Boden
     [0, 57, 64, 3],   # Plattform 1
@@ -47,6 +59,11 @@ class GameState:
     ascend_frames: int
     enemy_pos: jnp.ndarray  # shape (N, 2)
     enemy_vel: jnp.ndarray  # shape (N, 2)
+    game_phase: jnp.int32   # 0=normal, 1=coin_stage
+    coin_timer: jnp.int32
+    coins_active: jnp.ndarray  # boolean array
+    score: jnp.int32
+    kills: jnp.int32          # Track enemy kills
 
 # --- Initialzustand ---
 def init_state():
@@ -60,7 +77,12 @@ def init_state():
         jump_phase=jnp.int32(0),
         ascend_frames=jnp.int32(0),
         enemy_pos=enemy_pos,
-        enemy_vel=enemy_vel
+        enemy_vel=enemy_vel,
+        game_phase=jnp.int32(0),      # Start in normal phase
+        coin_timer=jnp.int32(0),
+        coins_active=jnp.zeros(COIN_POSITIONS.shape[0], dtype=bool),
+        score=jnp.int32(0),
+        kills=jnp.int32(0)
 
     )
 
@@ -170,7 +192,12 @@ def step(state: GameState, action: jnp.ndarray) -> GameState:
         jump_phase=jump_phase.astype(jnp.int32),
         ascend_frames=asc_left.astype(jnp.int32),
         enemy_pos=state.enemy_pos,
-        enemy_vel=state.enemy_vel
+        enemy_vel=state.enemy_vel,
+        game_phase=state.game_phase,
+        coin_timer=state.coin_timer,
+        coins_active=state.coins_active,
+        score=state.score,
+        kills=state.kills
     )
 
 # -------------------- MAIN ----------------------------------------
@@ -181,6 +208,9 @@ def main():
     )
     pygame.display.set_caption("JAX Mario Bros Prototype")
     clock = pygame.time.Clock()
+
+    # initiwlize font for score and timer
+    font = pygame.font.SysFont(None, 24 * WINDOW_SCALE)
 
     state = init_state()
     running = True
@@ -272,6 +302,56 @@ def main():
         # ----------------- UPDATE & RENDER ------------------------
         state = step(state, jnp.array([move, jump], dtype=jnp.float32))
 
+        # Handle enemy collisions
+        if state.game_phase == 0:  # Only in normal phase
+            collision = check_enemy_collision(state.pos, state.enemy_pos)
+            if collision:
+                print("Hit by enemy! Respawning...")
+                state = init_state().replace(score=state.score)
+        
+        # Check if we should transition to coin stage
+        if state.game_phase == 0 and state.kills >= 2:
+            print("Starting coin stage!")
+            state = state.replace(
+                game_phase=jnp.int32(1),
+                coin_timer=jnp.int32(COIN_STAGE_DURATION),
+                coins_active=jnp.ones(COIN_POSITIONS.shape[0], dtype=bool),
+                enemy_pos=jnp.zeros((0, 2)),  # Remove enemies
+                enemy_vel=jnp.zeros((0, 2))
+            )
+        
+        # Handle coin stage logic
+        if state.game_phase == 1:  # Coin stage
+            # Update timer
+            state = state.replace(coin_timer=state.coin_timer - 1)
+            
+            # Check coin collisions
+            new_coins_active = []
+            coin_collected = False
+            
+            for i in range(len(COIN_POSITIONS)):
+                if state.coins_active[i]:
+                    if check_coin_collision(state.pos, COIN_POSITIONS[i]):
+                        new_coins_active.append(False)
+                        coin_collected = True
+                        state = state.replace(score=state.score + COIN_SCORE)
+                        print(f"Coin collected! Score: {state.score}")
+                    else:
+                        new_coins_active.append(True)
+                else:
+                    new_coins_active.append(False)
+            
+            if coin_collected:
+                state = state.replace(coins_active=jnp.array(new_coins_active))
+            
+            # End coin stage conditions
+            if state.coin_timer <= 0 or jnp.all(~state.coins_active):
+                print("Coin stage ended! Returning to normal gameplay.")
+                # Return to normal gameplay with new enemies
+                state = init_state().replace(
+                    score=state.score,
+                    kills=jnp.int32(0)
+                )
 
         screen.fill((0, 0, 0))
         # player
@@ -292,6 +372,37 @@ def main():
         if check_enemy_collision(state.pos, state.enemy_pos):
             print("Hit by enemy! Respawning...")
             state = init_state()
+        
+        # Draw enemies (only in normal phase)
+        if state.game_phase == 0:
+            for ep in state.enemy_pos:
+                draw_rect((255, 0, 0), (*ep.tolist(), *ENEMY_SIZE))
+
+        # Draw coins (only in coin stage)
+        if state.game_phase == 1:
+            for i, coin_pos in enumerate(COIN_POSITIONS):
+                if state.coins_active[i]:
+                    pygame.draw.circle(
+                        screen, 
+                        COIN_COLOR,
+                        (int(coin_pos[0] * WINDOW_SCALE), 
+                         int(coin_pos[1] * WINDOW_SCALE)),
+                        COIN_SIZE * WINDOW_SCALE
+                    )
+        
+        # Draw score
+        score_text = font.render(f"Score: {state.score}", True, (255, 255, 255))
+        screen.blit(score_text, (5 * WINDOW_SCALE, 5 * WINDOW_SCALE))
+        
+        # Draw coin stage timer
+        if state.game_phase == 1:
+            timer_text = font.render(
+                f"Time: {state.coin_timer // 30}", 
+                True, 
+                (255, 255, 255)
+            )
+            screen.blit(timer_text, 
+                (5 * WINDOW_SCALE, (SCREEN_HEIGHT - 25) * WINDOW_SCALE))
 
         pygame.display.flip()
         clock.tick(30)
